@@ -103,118 +103,240 @@ function sndGameOver(){
 }
 function vibrate(ms){ try{ if(navigator.vibrate) navigator.vibrate(ms||20); }catch(e){} }
 
-// ============ PIXEL ART SPRITES ============
-// Pixel art: 1=cuerpo, 2=ojos/detail, 3=antenas, 4=patas, 5=brillo
-var SPRITES = {
-  // Tipo A (fila 0): alienígena clásico
-  A: {
-    w:11, h:8,
-    px:[
-      [0,0,1,0,0,0,0,0,1,0,0],
-      [0,0,0,1,0,0,0,1,0,0,0],
-      [0,0,1,1,1,1,1,1,1,0,0],
-      [0,1,1,2,1,1,1,2,1,1,0],
-      [1,1,1,1,1,1,1,1,1,1,1],
-      [1,0,1,1,1,1,1,1,1,0,1],
-      [1,0,1,0,0,0,0,0,1,0,1],
-      [0,0,0,1,1,0,1,1,0,0,0]
-    ],
-    cols:['#0f0','#fff','#0f0','#080','#0f0']
-  },
-  // Tipo B (filas 1-2): medusa
-  B: {
-    w:11, h:8,
-    px:[
-      [0,0,0,1,1,1,1,1,0,0,0],
-      [0,1,1,1,1,1,1,1,1,1,0],
-      [1,1,2,1,1,1,1,1,2,1,1],
-      [1,1,1,1,1,1,1,1,1,1,1],
-      [1,1,2,2,1,1,1,2,2,1,1],
-      [0,1,1,1,1,1,1,1,1,1,0],
-      [0,0,4,0,4,0,4,0,4,0,0],
-      [0,0,0,0,0,0,0,0,0,0,0]
-    ],
-    cols:['#0cf','#fff','#06a','#0cf','#0cf']
-  },
-  // Tipo C (filas 3-4): cangrejo
-  C: {
-    w:11, h:8,
-    px:[
-      [0,4,0,0,1,1,1,0,0,4,0],
-      [0,0,4,1,1,1,1,1,4,0,0],
-      [0,1,1,2,1,1,1,2,1,1,0],
-      [1,1,1,1,1,1,1,1,1,1,1],
-      [4,1,1,1,1,1,1,1,1,1,4],
-      [4,1,0,1,0,1,0,1,0,1,4],
-      [0,0,4,0,0,0,0,0,4,0,0],
-      [0,0,0,0,0,0,0,0,0,0,0]
-    ],
-    cols:['#f80','#fff','#a50','#f80','#f80']
-  }
-};
+var PX = 4;
 
-var PX = 4; // tamaño de cada pixel del sprite
+// ============ CARTOON DRAWING HELPERS ============
+function roundRect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.lineTo(x+w-r,y);
+  ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r);
+  ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h);
+  ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r);
+  ctx.quadraticCurveTo(x,y,x+r,y);
+  ctx.closePath();
+}
+function outline(color,width){ ctx.strokeStyle=color; ctx.lineWidth=width||2; ctx.stroke(); }
+function eye(x,y,r,pupilX,pupilY){
+  // blanco
+  ctx.fillStyle='#fff';
+  ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
+  outline('#222',1);
+  // pupila
+  ctx.fillStyle='#111';
+  ctx.beginPath(); ctx.arc(x+(pupilX||0),y+(pupilY||0),r*0.45,0,Math.PI*2); ctx.fill();
+  // brillo
+  ctx.fillStyle='rgba(255,255,255,0.8)';
+  ctx.beginPath(); ctx.arc(x+(pupilX||0)-r*0.15,y+(pupilY||0)-r*0.2,r*0.18,0,Math.PI*2); ctx.fill();
+}
+
+// ── TIPO A: cabeza redonda verde con antenas ──
+function drawInvaderA(cx,cy,frame){
+  var bob=Math.sin(frame*0.15)*1.5;
+  cy+=bob;
+  // antenas
+  ctx.strokeStyle='#5dfc5d'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(cx-8,cy-14); ctx.lineTo(cx-12,cy-22); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx+8,cy-14); ctx.lineTo(cx+12,cy-22); ctx.stroke();
+  ctx.fillStyle='#ffeb3b';
+  ctx.beginPath(); ctx.arc(cx-12,cy-22,3,0,Math.PI*2); ctx.fill(); outline('#e65100',1);
+  ctx.beginPath(); ctx.arc(cx+12,cy-22,3,0,Math.PI*2); ctx.fill(); outline('#e65100',1);
+  // cuerpo principal
+  var g=ctx.createRadialGradient(cx-4,cy-6,2,cx,cy,16);
+  g.addColorStop(0,'#a8ff78'); g.addColorStop(1,'#2ecc40');
+  ctx.fillStyle=g;
+  ctx.beginPath(); ctx.arc(cx,cy,16,0,Math.PI*2); ctx.fill();
+  outline('#1a7a1a',2.5);
+  // manchas decorativas
+  ctx.fillStyle='rgba(255,255,255,0.15)';
+  ctx.beginPath(); ctx.arc(cx-5,cy-5,5,0,Math.PI*2); ctx.fill();
+  // ojos
+  eye(cx-6,cy-3,4.5, frame%2===0?0.5:-0.5,0);
+  eye(cx+6,cy-3,4.5, frame%2===0?0.5:-0.5,0);
+  // boca
+  ctx.strokeStyle='#1a7a1a'; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.arc(cx,cy+6,4,0.1,Math.PI-0.1); ctx.stroke();
+  // patitas
+  ctx.strokeStyle='#2ecc40'; ctx.lineWidth=2;
+  var legOff=frame%2===0?2:-2;
+  ctx.beginPath(); ctx.moveTo(cx-12,cy+12); ctx.lineTo(cx-16,cy+18+legOff); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx+12,cy+12); ctx.lineTo(cx+16,cy+18+legOff); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx-5,cy+14); ctx.lineTo(cx-5,cy+20-legOff); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx+5,cy+14); ctx.lineTo(cx+5,cy+20-legOff); ctx.stroke();
+}
+
+// ── TIPO B: medusa azul/morada con tentáculos ──
+function drawInvaderB(cx,cy,frame){
+  var bob=Math.sin(frame*0.15+1)*1.5;
+  cy+=bob;
+  // cúpula
+  var g=ctx.createRadialGradient(cx-4,cy-4,2,cx,cy+2,18);
+  g.addColorStop(0,'#a78bfa'); g.addColorStop(1,'#7c3aed');
+  ctx.fillStyle=g;
+  ctx.beginPath();
+  ctx.arc(cx,cy,17,Math.PI,0); // semiesfera
+  ctx.closePath(); ctx.fill();
+  outline('#4c1d95',2.5);
+  // brillo
+  ctx.fillStyle='rgba(255,255,255,0.2)';
+  ctx.beginPath(); ctx.ellipse(cx-4,cy-7,6,3,0,0,Math.PI*2); ctx.fill();
+  // cuerpo inferior redondeado
+  ctx.fillStyle='#8b5cf6';
+  ctx.beginPath();
+  ctx.ellipse(cx,cy+2,17,8,0,0,Math.PI); ctx.fill();
+  outline('#4c1d95',2);
+  // ojos
+  eye(cx-6,cy-2,4, frame%2===0?0.4:-0.4,0);
+  eye(cx+6,cy-2,4, frame%2===0?0.4:-0.4,0);
+  // tentáculos
+  ctx.strokeStyle='#a78bfa'; ctx.lineWidth=2.5; ctx.lineCap='round';
+  var t=frame*0.12;
+  var txs=[-12,-6,0,6,12];
+  for(var i=0;i<txs.length;i++){
+    var wave=Math.sin(t+i*0.8)*(frame%2===0?3:-3);
+    ctx.beginPath();
+    ctx.moveTo(cx+txs[i], cy+10);
+    ctx.quadraticCurveTo(cx+txs[i]+wave, cy+16, cx+txs[i]-wave*0.5, cy+22);
+    ctx.stroke();
+  }
+  ctx.lineCap='butt';
+}
+
+// ── TIPO C: cangrejo naranja con pinzas ──
+function drawInvaderC(cx,cy,frame){
+  var bob=Math.sin(frame*0.15+2)*1.5;
+  cy+=bob;
+  var claw=frame%2===0?2:-2;
+  // pinzas
+  ctx.strokeStyle='#f97316'; ctx.lineWidth=2.5; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(cx-14,cy); ctx.lineTo(cx-20,cy-4+claw); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx-14,cy); ctx.lineTo(cx-20,cy+4-claw); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx+14,cy); ctx.lineTo(cx+20,cy-4+claw); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx+14,cy); ctx.lineTo(cx+20,cy+4-claw); ctx.stroke();
+  ctx.lineCap='butt';
+  // bolas pinzas
+  ctx.fillStyle='#fb923c';
+  ctx.beginPath(); ctx.arc(cx-20,cy-4+claw,4,0,Math.PI*2); ctx.fill(); outline('#c2410c',1.5);
+  ctx.beginPath(); ctx.arc(cx-20,cy+4-claw,4,0,Math.PI*2); ctx.fill(); outline('#c2410c',1.5);
+  ctx.beginPath(); ctx.arc(cx+20,cy-4+claw,4,0,Math.PI*2); ctx.fill(); outline('#c2410c',1.5);
+  ctx.beginPath(); ctx.arc(cx+20,cy+4-claw,4,0,Math.PI*2); ctx.fill(); outline('#c2410c',1.5);
+  // caparazón
+  var g=ctx.createRadialGradient(cx-4,cy-4,2,cx,cy,16);
+  g.addColorStop(0,'#fdba74'); g.addColorStop(1,'#ea580c');
+  ctx.fillStyle=g;
+  ctx.beginPath(); ctx.ellipse(cx,cy,16,12,0,0,Math.PI*2); ctx.fill();
+  outline('#9a3412',2.5);
+  // patrón caparazón
+  ctx.strokeStyle='rgba(154,52,18,0.4)'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.arc(cx,cy,8,0,Math.PI*2); ctx.stroke();
+  // ojos en palitos
+  ctx.strokeStyle='#ea580c'; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.moveTo(cx-5,cy-10); ctx.lineTo(cx-5,cy-16); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx+5,cy-10); ctx.lineTo(cx+5,cy-16); ctx.stroke();
+  eye(cx-5,cy-17,4, frame%2===0?0.4:-0.4,0);
+  eye(cx+5,cy-17,4, frame%2===0?0.4:-0.4,0);
+  // patitas
+  ctx.strokeStyle='#f97316'; ctx.lineWidth=1.8;
+  var legY=frame%2===0?1:-1;
+  for(var l=-1;l<=1;l+=2){
+    ctx.beginPath(); ctx.moveTo(cx+l*10,cy+8); ctx.lineTo(cx+l*14,cy+16+legY); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx+l*6,cy+10); ctx.lineTo(cx+l*8,cy+17-legY); ctx.stroke();
+  }
+}
+
+// ── NAVE DEL JUGADOR cartoon ──
+function drawShip(x, y){
+  var cx=x+SHIP_W/2, cy=y+SHIP_H/2;
+  // motor / llama
+  var flameH=6+Math.random()*4;
+  ctx.fillStyle='rgba(255,160,0,0.85)';
+  ctx.beginPath();
+  ctx.moveTo(cx-6,y+SHIP_H);
+  ctx.quadraticCurveTo(cx,y+SHIP_H+flameH,cx+6,y+SHIP_H);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle='rgba(255,220,0,0.6)';
+  ctx.beginPath();
+  ctx.moveTo(cx-3,y+SHIP_H);
+  ctx.quadraticCurveTo(cx,y+SHIP_H+flameH*0.6,cx+3,y+SHIP_H);
+  ctx.closePath(); ctx.fill();
+  // cuerpo principal
+  var g=ctx.createLinearGradient(x,y,x+SHIP_W,y+SHIP_H);
+  g.addColorStop(0,'#67e8f9'); g.addColorStop(0.5,'#22d3ee'); g.addColorStop(1,'#0891b2');
+  ctx.fillStyle=g;
+  ctx.beginPath();
+  ctx.moveTo(cx,y);
+  ctx.quadraticCurveTo(cx+SHIP_W*0.55,y+SHIP_H*0.4, x+SHIP_W,y+SHIP_H);
+  ctx.quadraticCurveTo(cx,y+SHIP_H*0.75, x,y+SHIP_H);
+  ctx.quadraticCurveTo(cx-SHIP_W*0.55,y+SHIP_H*0.4, cx,y);
+  ctx.fill();
+  outline('#0e7490',2);
+  // cabina
+  var cg=ctx.createRadialGradient(cx,cy-4,1,cx,cy-2,9);
+  cg.addColorStop(0,'#e0f2fe'); cg.addColorStop(1,'#38bdf8');
+  ctx.fillStyle=cg;
+  ctx.beginPath(); ctx.ellipse(cx,cy-2,9,7,0,0,Math.PI*2); ctx.fill();
+  outline('#0369a1',1.5);
+  // brillo cabina
+  ctx.fillStyle='rgba(255,255,255,0.5)';
+  ctx.beginPath(); ctx.ellipse(cx-2,cy-5,4,2.5,-0.4,0,Math.PI*2); ctx.fill();
+  // alas
+  ctx.fillStyle='#0891b2';
+  ctx.beginPath(); ctx.moveTo(x+4,y+SHIP_H); ctx.lineTo(x-6,y+SHIP_H+4); ctx.lineTo(x+8,y+SHIP_H-4); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(x+SHIP_W-4,y+SHIP_H); ctx.lineTo(x+SHIP_W+6,y+SHIP_H+4); ctx.lineTo(x+SHIP_W-8,y+SHIP_H-4); ctx.closePath(); ctx.fill();
+}
+
+// ── UFO cartoon al estilo de la imagen ──
+function drawUFO(x, y){
+  var cx=x+26, cy=y+12;
+  // sombra suave debajo
+  ctx.fillStyle='rgba(255,80,80,0.15)';
+  ctx.beginPath(); ctx.ellipse(cx,cy+14,28,5,0,0,Math.PI*2); ctx.fill();
+  // ala/plato inferior
+  var pg=ctx.createLinearGradient(cx-30,cy+6,cx,cy+18);
+  pg.addColorStop(0,'#b0b8c8'); pg.addColorStop(0.5,'#e2e8f0'); pg.addColorStop(1,'#94a3b8');
+  ctx.fillStyle=pg;
+  ctx.beginPath(); ctx.ellipse(cx,cy+10,30,8,0,0,Math.PI*2); ctx.fill();
+  outline('#64748b',2);
+  // luces verdes en el ala
+  var lc=['#4ade80','#22c55e','#86efac'];
+  for(var i=0;i<3;i++){
+    ctx.fillStyle=lc[i%lc.length];
+    ctx.beginPath(); ctx.arc(cx-14+i*14, cy+10, 3.5, 0, Math.PI*2); ctx.fill();
+    outline('#15803d',1);
+  }
+  // cúpula
+  var dg=ctx.createRadialGradient(cx-6,cy-4,2,cx,cy,16);
+  dg.addColorStop(0,'#e2e8f0'); dg.addColorStop(0.6,'#94a3b8'); dg.addColorStop(1,'#475569');
+  ctx.fillStyle=dg;
+  ctx.beginPath(); ctx.arc(cx,cy,16,Math.PI,0); ctx.closePath(); ctx.fill();
+  outline('#334155',2);
+  // ventanillas
+  ctx.fillStyle='#1e293b';
+  ctx.beginPath(); ctx.arc(cx-8,cy-2,4,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx+8,cy-2,4,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx,cy-6,3,0,Math.PI*2); ctx.fill();
+  // brillos ventanillas
+  ctx.fillStyle='rgba(125,211,252,0.7)';
+  ctx.beginPath(); ctx.arc(cx-9,cy-3,1.5,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx+7,cy-3,1.5,0,Math.PI*2); ctx.fill();
+  // brillo cúpula
+  ctx.fillStyle='rgba(255,255,255,0.35)';
+  ctx.beginPath(); ctx.ellipse(cx-4,cy-8,5,3,-0.3,0,Math.PI*2); ctx.fill();
+}
 
 function drawSprite(spr, x, y, frame){
-  var px = spr.px;
-  var cols = spr.cols;
-  var flip = (frame%2===0);
-  for(var row=0; row<spr.h; row++){
-    for(var col=0; col<spr.w; col++){
-      var ci = flip ? col : (spr.w-1-col);
-      var v = px[row][ci];
-      if(v>0){
-        ctx.fillStyle = cols[v-1];
-        ctx.fillRect(x + col*PX, y + row*PX, PX, PX);
-      }
-    }
-  }
+  // wrapper de compatibilidad — no usado en cartoon, pero por si acaso
+  var cx=x+spr.w*PX/2, cy=y+spr.h*PX/2;
+  drawInvaderA(cx,cy,frame);
 }
 
-// Nave del jugador en pixel art
-function drawShip(x, y){
-  var ship = [
-    [0,0,0,0,5,0,0,0,0],
-    [0,0,0,5,5,5,0,0,0],
-    [0,0,5,5,5,5,5,0,0],
-    [0,5,5,5,5,5,5,5,0],
-    [5,5,5,5,5,5,5,5,5],
-    [5,0,6,5,5,5,6,0,5],
-    [0,0,5,0,0,0,5,0,0]
-  ];
-  var cols={5:'#4eff6e',6:'#ff4040',0:null};
-  for(var row=0;row<ship.length;row++){
-    for(var col=0;col<ship[row].length;col++){
-      var v=ship[row][col];
-      if(v&&cols[v]){
-        ctx.fillStyle=cols[v];
-        ctx.fillRect(x+col*4, y+row*3, 4, 3);
-      }
-    }
-  }
-  // motor glow
-  ctx.fillStyle='rgba(78,255,110,0.3)';
-  ctx.fillRect(x+14, y+21, 8, 3);
-}
-
-// UFO (nave misteriosa)
-function drawUFO(x, y){
-  var ufo=[
-    [0,0,0,7,7,7,7,7,0,0,0],
-    [0,0,7,7,8,8,8,7,7,0,0],
-    [0,7,7,8,8,8,8,8,7,7,0],
-    [7,7,7,7,7,7,7,7,7,7,7],
-    [0,7,0,7,0,7,0,7,0,7,0]
-  ];
-  for(var r=0;r<ufo.length;r++){
-    for(var c=0;c<ufo[r].length;c++){
-      var v=ufo[r][c];
-      if(v===7) ctx.fillStyle='#f00';
-      else if(v===8) ctx.fillStyle='#faa';
-      else continue;
-      ctx.fillRect(x+c*PX, y+r*PX, PX, PX);
-    }
-  }
+function getInvBaseColor(row){
+  if(row===0) return '#2ecc40';
+  if(row<=2) return '#a78bfa';
+  return '#f97316';
 }
 
 // ============ BUNKERS ============
@@ -691,25 +813,24 @@ function drawTitle(){
   ctx.fillText('= PUNTUACIONES =', W/2, 195);
   
   var demo=[
-    {type:'A', y:230, pts:30},
-    {type:'B', y:290, pts:20},
-    {type:'C', y:350, pts:10}
+    {fn:function(cx,cy,f){drawInvaderA(cx,cy,f);}, y:220, pts:30, col:'#2ecc40'},
+    {fn:function(cx,cy,f){drawInvaderB(cx,cy,f);}, y:278, pts:20, col:'#a78bfa'},
+    {fn:function(cx,cy,f){drawInvaderC(cx,cy,f);}, y:336, pts:10, col:'#f97316'}
   ];
   for(var i=0;i<demo.length;i++){
     var d=demo[i];
-    var spr=SPRITES[d.type];
-    drawSprite(spr, W/2-60, d.y, titleAnim);
-    ctx.fillStyle=getInvBaseColor(d.type==='A'?0:d.type==='B'?1:3);
+    d.fn(W/2-55, d.y, titleAnim);
+    ctx.fillStyle=d.col;
     ctx.font='bold 12px monospace';
     ctx.textAlign='left';
-    ctx.fillText('= '+d.pts+' PTS', W/2-10, d.y+22);
+    ctx.fillText('= '+d.pts+' PTS', W/2-15, d.y+6);
   }
   // UFO
-  drawUFO(W/2-60, 410);
+  drawUFO(W/2-70, 398);
   ctx.fillStyle='#f55';
   ctx.font='bold 12px monospace';
   ctx.textAlign='left';
-  ctx.fillText('= ??? PTS', W/2-10, 430);
+  ctx.fillText('= ??? PTS', W/2-15, 412);
   
   ctx.textAlign='center';
   ctx.font='bold 13px monospace';
@@ -802,8 +923,10 @@ function draw(){
     for(var c=0;c<INV_COLS;c++){
       if(invaders[r][c]){
         var pos=getInvPos(c,r);
-        var type=getInvType(r);
-        drawSprite(SPRITES[type], pos.x, pos.y, invFrame);
+        var cx2=pos.x+pos.w/2, cy2=pos.y+pos.h/2;
+        if(r===0) drawInvaderA(cx2,cy2,invFrame);
+        else if(r<=2) drawInvaderB(cx2,cy2,invFrame);
+        else drawInvaderC(cx2,cy2,invFrame);
       }
     }
   }
