@@ -541,6 +541,11 @@ function rectHit(ax,ay,aw,ah, bx,by,bw,bh){
 }
 
 function updateGame(){
+  if(state===STATE.LEVELUP){
+    levelUpTimer--;
+    if(levelUpTimer<=0){ initLevel(level); state=STATE.PLAYING; updateHUD(); }
+    return;
+  }
   if(state!==STATE.PLAYING) return;
   frame++;
   
@@ -635,15 +640,6 @@ function updateGame(){
   if(ufo.active){
     ufo.x+=ufo.dir*ufo.speed;
     if(ufo.x>W+60||ufo.x<-60) ufo.active=false;
-  }
-  
-  // Level up timer
-  if(state===STATE.LEVELUP){
-    levelUpTimer--;
-    if(levelUpTimer<=0){
-      initLevel(level);
-      state=STATE.PLAYING;
-    }
   }
   
   updateHUD();
