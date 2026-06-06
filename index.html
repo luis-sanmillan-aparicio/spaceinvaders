@@ -1,0 +1,984 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>SPACE RAIDERS</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none;}
+html,body{width:100%;height:100%;overflow:hidden;background:#000;}
+body{display:flex;justify-content:center;align-items:center;font-family:'Courier New',monospace;}
+#wrap{position:relative;width:100%;height:100%;display:flex;justify-content:center;align-items:center;}
+canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}
+#ui{position:absolute;top:0;left:50%;transform:translateX(-50%);width:100%;max-width:600px;pointer-events:none;}
+#hud{display:flex;justify-content:space-between;align-items:center;padding:8px 14px;background:rgba(0,0,0,0.7);}
+.hud-block{display:flex;flex-direction:column;align-items:center;gap:1px;}
+.hud-label{font-size:9px;letter-spacing:2px;color:#555;text-transform:uppercase;}
+.hud-value{font-size:20px;font-weight:bold;color:#0f0;text-shadow:0 0 8px #0f0;}
+#hi-value{color:#ff0;text-shadow:0 0 8px #ff0;}
+#lvl-value{color:#0ff;text-shadow:0 0 8px #0ff;}
+#lives-dots{display:flex;gap:4px;align-items:center;}
+.life-icon{font-size:14px;}
+#ctrl-hint{position:absolute;bottom:8px;left:0;right:0;text-align:center;font-size:10px;color:#333;letter-spacing:1px;pointer-events:none;}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c"></canvas>
+  <div id="ui">
+    <div id="hud">
+      <div class="hud-block">
+        <span class="hud-label">SCORE</span>
+        <span class="hud-value" id="sc-v">000000</span>
+      </div>
+      <div class="hud-block">
+        <span class="hud-label">BEST</span>
+        <span class="hud-value" id="hi-value">000000</span>
+      </div>
+      <div class="hud-block">
+        <span class="hud-label">LEVEL</span>
+        <span class="hud-value" id="lvl-value">01</span>
+      </div>
+      <div class="hud-block">
+        <span class="hud-label">LIVES</span>
+        <div id="lives-dots"></div>
+      </div>
+    </div>
+  </div>
+  <div id="ctrl-hint">ARRASTRA → mover &nbsp;|&nbsp; TOCA → disparar &nbsp;|&nbsp; ← → ESPACIO en PC</div>
+</div>
+
+<script>
+(function(){
+'use strict';
+
+// ============ CANVAS & SCALE ============
+var C = document.getElementById('c');
+var ctx = C.getContext('2d');
+var W = 400, H = 550;
+var scale = 1;
+
+function resize(){
+  var vw = window.innerWidth, vh = window.innerHeight;
+  var hudH = document.getElementById('hud').offsetHeight + 10;
+  var avail = vh - hudH - 30;
+  scale = Math.min(vw/W, avail/H);
+  scale = Math.max(0.5, Math.min(2.5, scale));
+  C.style.width = (W*scale)+'px';
+  C.style.height = (H*scale)+'px';
+  C.width = W; C.height = H;
+  // reposition UI
+  var uiEl = document.getElementById('ui');
+  uiEl.style.width = (W*scale)+'px';
+  uiEl.style.marginTop = '0';
+}
+window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', function(){ setTimeout(resize,80); });
+
+// ============ SOUND (Web Audio) ============
+var AC = null;
+function getAC(){
+  if(!AC){ try{ AC = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} }
+  return AC;
+}
+function beep(freq, dur, type, vol){
+  var ac = getAC(); if(!ac) return;
+  try{
+    var o = ac.createOscillator(), g = ac.createGain();
+    o.type = type||'square'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol||0.15, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime+dur);
+    o.connect(g); g.connect(ac.destination);
+    o.start(); o.stop(ac.currentTime+dur);
+  }catch(e){}
+}
+function sndShoot(){ beep(440,0.06,'square',0.12); }
+function sndHit(){ beep(180,0.12,'sawtooth',0.18); beep(120,0.15,'sawtooth',0.1); }
+function sndPlayerHit(){ beep(80,0.3,'sawtooth',0.25); beep(60,0.4,'sawtooth',0.2); }
+function sndLevelUp(){ 
+  [523,659,784,1047].forEach(function(f,i){ setTimeout(function(){ beep(f,0.1,'square',0.15); },i*80); });
+}
+function sndGameOver(){ 
+  [300,250,200,150,100].forEach(function(f,i){ setTimeout(function(){ beep(f,0.15,'sawtooth',0.2); },i*100); });
+}
+function vibrate(ms){ try{ if(navigator.vibrate) navigator.vibrate(ms||20); }catch(e){} }
+
+// ============ PIXEL ART SPRITES ============
+// Pixel art: 1=cuerpo, 2=ojos/detail, 3=antenas, 4=patas, 5=brillo
+var SPRITES = {
+  // Tipo A (fila 0): alienígena clásico
+  A: {
+    w:11, h:8,
+    px:[
+      [0,0,1,0,0,0,0,0,1,0,0],
+      [0,0,0,1,0,0,0,1,0,0,0],
+      [0,0,1,1,1,1,1,1,1,0,0],
+      [0,1,1,2,1,1,1,2,1,1,0],
+      [1,1,1,1,1,1,1,1,1,1,1],
+      [1,0,1,1,1,1,1,1,1,0,1],
+      [1,0,1,0,0,0,0,0,1,0,1],
+      [0,0,0,1,1,0,1,1,0,0,0]
+    ],
+    cols:['#0f0','#fff','#0f0','#080','#0f0']
+  },
+  // Tipo B (filas 1-2): medusa
+  B: {
+    w:11, h:8,
+    px:[
+      [0,0,0,1,1,1,1,1,0,0,0],
+      [0,1,1,1,1,1,1,1,1,1,0],
+      [1,1,2,1,1,1,1,1,2,1,1],
+      [1,1,1,1,1,1,1,1,1,1,1],
+      [1,1,2,2,1,1,1,2,2,1,1],
+      [0,1,1,1,1,1,1,1,1,1,0],
+      [0,0,4,0,4,0,4,0,4,0,0],
+      [0,0,0,0,0,0,0,0,0,0,0]
+    ],
+    cols:['#0cf','#fff','#06a','#0cf','#0cf']
+  },
+  // Tipo C (filas 3-4): cangrejo
+  C: {
+    w:11, h:8,
+    px:[
+      [0,4,0,0,1,1,1,0,0,4,0],
+      [0,0,4,1,1,1,1,1,4,0,0],
+      [0,1,1,2,1,1,1,2,1,1,0],
+      [1,1,1,1,1,1,1,1,1,1,1],
+      [4,1,1,1,1,1,1,1,1,1,4],
+      [4,1,0,1,0,1,0,1,0,1,4],
+      [0,0,4,0,0,0,0,0,4,0,0],
+      [0,0,0,0,0,0,0,0,0,0,0]
+    ],
+    cols:['#f80','#fff','#a50','#f80','#f80']
+  }
+};
+
+var PX = 4; // tamaño de cada pixel del sprite
+
+function drawSprite(spr, x, y, frame){
+  var px = spr.px;
+  var cols = spr.cols;
+  var flip = (frame%2===0);
+  for(var row=0; row<spr.h; row++){
+    for(var col=0; col<spr.w; col++){
+      var ci = flip ? col : (spr.w-1-col);
+      var v = px[row][ci];
+      if(v>0){
+        ctx.fillStyle = cols[v-1];
+        ctx.fillRect(x + col*PX, y + row*PX, PX, PX);
+      }
+    }
+  }
+}
+
+// Nave del jugador en pixel art
+function drawShip(x, y){
+  var ship = [
+    [0,0,0,0,5,0,0,0,0],
+    [0,0,0,5,5,5,0,0,0],
+    [0,0,5,5,5,5,5,0,0],
+    [0,5,5,5,5,5,5,5,0],
+    [5,5,5,5,5,5,5,5,5],
+    [5,0,6,5,5,5,6,0,5],
+    [0,0,5,0,0,0,5,0,0]
+  ];
+  var cols={5:'#4eff6e',6:'#ff4040',0:null};
+  for(var row=0;row<ship.length;row++){
+    for(var col=0;col<ship[row].length;col++){
+      var v=ship[row][col];
+      if(v&&cols[v]){
+        ctx.fillStyle=cols[v];
+        ctx.fillRect(x+col*4, y+row*3, 4, 3);
+      }
+    }
+  }
+  // motor glow
+  ctx.fillStyle='rgba(78,255,110,0.3)';
+  ctx.fillRect(x+14, y+21, 8, 3);
+}
+
+// UFO (nave misteriosa)
+function drawUFO(x, y){
+  var ufo=[
+    [0,0,0,7,7,7,7,7,0,0,0],
+    [0,0,7,7,8,8,8,7,7,0,0],
+    [0,7,7,8,8,8,8,8,7,7,0],
+    [7,7,7,7,7,7,7,7,7,7,7],
+    [0,7,0,7,0,7,0,7,0,7,0]
+  ];
+  for(var r=0;r<ufo.length;r++){
+    for(var c=0;c<ufo[r].length;c++){
+      var v=ufo[r][c];
+      if(v===7) ctx.fillStyle='#f00';
+      else if(v===8) ctx.fillStyle='#faa';
+      else continue;
+      ctx.fillRect(x+c*PX, y+r*PX, PX, PX);
+    }
+  }
+}
+
+// ============ BUNKERS ============
+function makeBunker(cx, y){
+  // mapa de píxeles del bunker
+  var shape=[
+    [0,0,1,1,1,1,1,1,1,0,0],
+    [0,1,1,1,1,1,1,1,1,1,0],
+    [1,1,1,1,1,1,1,1,1,1,1],
+    [1,1,1,1,1,1,1,1,1,1,1],
+    [1,1,1,0,0,1,0,0,1,1,1],
+    [1,1,0,0,0,0,0,0,0,1,1]
+  ];
+  var px=[];
+  for(var r=0;r<shape.length;r++){
+    px[r]=[];
+    for(var c=0;c<shape[r].length;c++){
+      px[r][c]=shape[r][c]?255:0; // 0-255 hp
+    }
+  }
+  return {cx:cx, y:y, px:px, bw:11, bh:6, ps:4};
+}
+
+function drawBunker(b){
+  for(var r=0;r<b.bh;r++){
+    for(var c=0;c<b.bw;c++){
+      var v=b.px[r][c];
+      if(v>0){
+        var frac=v/255;
+        if(frac>0.66) ctx.fillStyle='#2e7d32';
+        else if(frac>0.33) ctx.fillStyle='#1b5e20';
+        else ctx.fillStyle='#0a2e0d';
+        ctx.fillRect(b.cx - b.bw*b.ps/2 + c*b.ps, b.y + r*b.ps, b.ps, b.ps);
+      }
+    }
+  }
+}
+
+function bunkerHit(b, bx, by, bw, bh){
+  // devuelve true si colisiona y daña el bunker
+  var bLeft = b.cx - b.bw*b.ps/2;
+  var hit=false;
+  for(var r=0;r<b.bh;r++){
+    for(var c=0;c<b.bw;c++){
+      if(b.px[r][c]<=0) continue;
+      var px=bLeft+c*b.ps, py=b.y+r*b.ps;
+      if(bx<px+b.ps && bx+bw>px && by<py+b.ps && by+bh>py){
+        b.px[r][c]=Math.max(0, b.px[r][c]-85);
+        hit=true;
+      }
+    }
+  }
+  return hit;
+}
+
+// ============ PARTÍCULAS ============
+var particles=[];
+function spawnExplosion(x,y,color,count){
+  count=count||12;
+  for(var i=0;i<count;i++){
+    var angle=Math.random()*Math.PI*2;
+    var speed=1+Math.random()*3;
+    particles.push({
+      x:x, y:y,
+      vx:Math.cos(angle)*speed,
+      vy:Math.sin(angle)*speed,
+      life:1, maxLife:15+Math.random()*20,
+      r:2+Math.random()*2,
+      color:color||'#fff'
+    });
+  }
+}
+function updateParticles(){
+  for(var i=particles.length-1;i>=0;i--){
+    var p=particles[i];
+    p.x+=p.vx; p.y+=p.vy;
+    p.vy+=0.1;
+    p.life--;
+    if(p.life<=0){ particles.splice(i,1); continue; }
+    var alpha=p.life/p.maxLife;
+    ctx.globalAlpha=alpha;
+    ctx.fillStyle=p.color;
+    ctx.fillRect(p.x, p.y, p.r, p.r);
+  }
+  ctx.globalAlpha=1;
+}
+
+// ============ STARS ============
+var stars=[];
+function makeStars(){
+  stars=[];
+  for(var i=0;i<120;i++){
+    stars.push({
+      x:Math.random()*W,
+      y:Math.random()*H,
+      r:Math.random()<0.3?1.5:1,
+      speed:0.1+Math.random()*0.3,
+      bright:0.3+Math.random()*0.7,
+      twinkle:Math.random()*Math.PI*2
+    });
+  }
+}
+function drawStars(frame){
+  for(var i=0;i<stars.length;i++){
+    var s=stars[i];
+    s.twinkle+=0.05;
+    var alpha=s.bright*(0.7+0.3*Math.sin(s.twinkle));
+    ctx.globalAlpha=alpha;
+    ctx.fillStyle='#fff';
+    ctx.fillRect(s.x, s.y, s.r, s.r);
+    s.y+=s.speed;
+    if(s.y>H){ s.y=0; s.x=Math.random()*W; }
+  }
+  ctx.globalAlpha=1;
+}
+
+// ============ ESTADO DEL JUEGO ============
+var STATE = { TITLE:0, PLAYING:1, LEVELUP:2, GAMEOVER:3 };
+var state = STATE.TITLE;
+var score=0, hiScore=0, lives=3, level=1;
+var frame=0;
+var levelUpTimer=0;
+
+// Jugador
+var SHIP_W=36, SHIP_H=21;
+var pX, pY;
+var pBlink=0; // frames de invencibilidad al ser golpeado
+
+// Balas jugador
+var bullets=[];
+var shotCool=0;
+var SHOT_DELAY=10;
+
+// Invasores
+var INV_ROWS=5, INV_COLS=9;
+var invaders=[];
+var invDir=1, invMoveWait=0, invOffX=0, invOffY=0;
+var invSpeed=0;
+var invFrame=0, invFrameTimer=0;
+var INV_SPW=11*PX, INV_SPH=8*PX; // sprite size in px
+var INV_PADX=6, INV_PADY=10;
+
+// Balas enemigas
+var eBullets=[];
+var eShootCool=0;
+
+// UFO
+var ufo={active:false, x:0, y:20, dir:1, timer:0, speed:1.5};
+var ufoTimer=0;
+
+// Bunkers
+var bunkers=[];
+
+function getInvType(row){
+  if(row===0) return 'A';
+  if(row<=2) return 'B';
+  return 'C';
+}
+function getInvScore(row){
+  if(row===0) return 30;
+  if(row<=2) return 20;
+  return 10;
+}
+function getInvBaseColor(row){
+  if(row===0) return '#0f0';
+  if(row<=2) return '#0cf';
+  return '#f80';
+}
+
+function getInvPos(col, row){
+  var baseX = 30;
+  var baseY = 60;
+  var spX = INV_SPW + INV_PADX;
+  var spY = INV_SPH + INV_PADY;
+  return {
+    x: baseX + col*spX + invOffX,
+    y: baseY + row*spY + invOffY,
+    w: INV_SPW, h: INV_SPH
+  };
+}
+
+function countAlive(){
+  var n=0;
+  for(var r=0;r<INV_ROWS;r++) for(var c=0;c<INV_COLS;c++) if(invaders[r][c]) n++;
+  return n;
+}
+
+function levelConfig(lvl){
+  return {
+    invSpeed: Math.max(6, 48 - lvl*2),
+    eShootBase: Math.max(18, 55 - lvl*4),
+    ufoSpeed: 1.2 + lvl*0.15,
+    ufoInterval: Math.max(300, 700 - lvl*40)
+  };
+}
+
+function initLevel(lvl){
+  invaders=[];
+  for(var r=0;r<INV_ROWS;r++){
+    invaders[r]=[];
+    for(var c=0;c<INV_COLS;c++) invaders[r][c]=true;
+  }
+  invDir=1; invOffX=0; invOffY=0;
+  var cfg=levelConfig(lvl);
+  invSpeed=cfg.invSpeed;
+  invMoveWait=invSpeed;
+  invFrame=0; invFrameTimer=0;
+  eBullets=[]; bullets=[];
+  eShootCool=cfg.eShootBase;
+  ufo.active=false; ufoTimer=cfg.ufoInterval;
+  particles=[];
+  shotCool=0; pBlink=0;
+  pX=W/2-SHIP_W/2; pY=H-50;
+  bunkers=[];
+}
+
+function restartGame(){
+  score=0; lives=3; level=1;
+  initLevel(1);
+  updateHUD();
+  state=STATE.PLAYING;
+}
+
+// ============ HUD ============
+function pad(n,len){ var s=String(n); while(s.length<len) s='0'+s; return s; }
+function updateHUD(){
+  document.getElementById('sc-v').textContent=pad(score,6);
+  document.getElementById('hi-value').textContent=pad(hiScore,6);
+  document.getElementById('lvl-value').textContent=pad(level,2);
+  var ld=document.getElementById('lives-dots');
+  ld.innerHTML='';
+  for(var i=0;i<lives;i++){
+    var s=document.createElement('span');
+    s.className='life-icon'; s.textContent='🚀';
+    ld.appendChild(s);
+  }
+}
+
+// ============ LÓGICA ============
+function updateInvaders(){
+  invFrameTimer++;
+  if(invFrameTimer>12){ invFrameTimer=0; invFrame=(invFrame+1)%2; }
+  
+  if(invMoveWait>0){ invMoveWait--; return; }
+  
+  var alive=countAlive();
+  // Acelerar cuantos menos quedan
+  var speedBoost = Math.max(0, Math.floor((INV_ROWS*INV_COLS - alive)/12));
+  
+  // Calcular límites actuales
+  var minX=9999,maxX=-9999;
+  for(var r=0;r<INV_ROWS;r++) for(var c=0;c<INV_COLS;c++){
+    if(invaders[r][c]){
+      var pos=getInvPos(c,r);
+      if(pos.x<minX) minX=pos.x;
+      if(pos.x+pos.w>maxX) maxX=pos.x+pos.w;
+    }
+  }
+  
+  var step=false;
+  if(invDir===1 && maxX>=W-10){ invDir=-1; step=true; }
+  else if(invDir===-1 && minX<=10){ invDir=1; step=true; }
+  
+  invOffX += invDir*8;
+  if(step){
+    invOffY+=10;
+    var cfg=levelConfig(level);
+    invSpeed=Math.max(3, cfg.invSpeed - speedBoost);
+  }
+  invMoveWait = Math.max(3, invSpeed - speedBoost);
+  
+  // Comprobar si llegaron abajo
+  for(var r=0;r<INV_ROWS;r++) for(var c=0;c<INV_COLS;c++){
+    if(invaders[r][c]){
+      var pos=getInvPos(c,r);
+      if(pos.y+pos.h>=pY+12){
+        loseLife();
+        return;
+      }
+    }
+  }
+}
+
+function loseLife(){
+  vibrate([50,30,80]);
+  sndPlayerHit();
+  spawnExplosion(pX+SHIP_W/2, pY+SHIP_H/2, '#4eff6e', 20);
+  lives--;
+  updateHUD();
+  if(lives<=0){
+    state=STATE.GAMEOVER;
+    sndGameOver();
+    if(score>hiScore){ hiScore=score; saveHi(); }
+    return;
+  }
+  pBlink=120;
+  pX=W/2-SHIP_W/2;
+  eBullets=[];
+}
+
+function enemyShoot(){
+  var alive=[];
+  for(var r=0;r<INV_ROWS;r++) for(var c=0;c<INV_COLS;c++)
+    if(invaders[r][c]) alive.push({r:r,c:c});
+  if(!alive.length) return;
+  
+  // Preferir los de la fila más baja (los más peligrosos)
+  var byCol={};
+  for(var i=0;i<alive.length;i++){
+    var inv=alive[i];
+    if(!byCol[inv.c] || inv.r>byCol[inv.c].r) byCol[inv.c]=inv;
+  }
+  var bottoms=Object.values(byCol);
+  var pick=bottoms[Math.floor(Math.random()*bottoms.length)];
+  var pos=getInvPos(pick.c, pick.r);
+  eBullets.push({
+    x:pos.x+pos.w/2-2, y:pos.y+pos.h,
+    w:4, h:10, vy:3+level*0.2
+  });
+}
+
+function rectHit(ax,ay,aw,ah, bx,by,bw,bh){
+  return ax<bx+bw && ax+aw>bx && ay<by+bh && ay+ah>by;
+}
+
+function updateGame(){
+  if(state!==STATE.PLAYING) return;
+  frame++;
+  
+  // Cooldowns
+  if(shotCool>0) shotCool--;
+  if(eShootCool>0) eShootCool--;
+  if(pBlink>0) pBlink--;
+  
+  // Balas jugador
+  for(var i=bullets.length-1;i>=0;i--){
+    var b=bullets[i];
+    b.y-=8;
+    if(b.y<-10){ bullets.splice(i,1); continue; }
+    
+    // vs UFO
+    if(ufo.active && rectHit(b.x,b.y,b.w,b.h, ufo.x,ufo.y,11*PX,5*PX)){
+      spawnExplosion(ufo.x+22,ufo.y+10,'#f00',16);
+      sndHit(); vibrate(20);
+      var ufoBonus=50+Math.floor(Math.random()*5)*50;
+      score+=ufoBonus;
+      showFloating('+'+ufoBonus, ufo.x+10, ufo.y, '#f00');
+      ufo.active=false;
+      bullets.splice(i,1);
+      updateHUD();
+      continue;
+    }
+    
+    // vs invasores
+    var hit=false;
+    outer: for(var r=0;r<INV_ROWS;r++) for(var c=0;c<INV_COLS;c++){
+      if(invaders[r][c]){
+        var pos=getInvPos(c,r);
+        if(rectHit(b.x,b.y,b.w,b.h, pos.x,pos.y,pos.w,pos.h)){
+          invaders[r][c]=false;
+          var pts=getInvScore(r);
+          score+=pts;
+          if(score>hiScore){ hiScore=score; }
+          showFloating('+'+pts, pos.x+pos.w/2, pos.y, getInvBaseColor(r));
+          spawnExplosion(pos.x+pos.w/2, pos.y+pos.h/2, getInvBaseColor(r), 10);
+          sndHit(); vibrate(15);
+          hit=true;
+          break outer;
+        }
+      }
+    }
+    if(hit){ bullets.splice(i,1); updateHUD(); }
+  }
+  
+  // Comprobar victoria
+  if(countAlive()===0){
+    sndLevelUp();
+    state=STATE.LEVELUP;
+    levelUpTimer=120;
+    level++;
+    if(score>hiScore){ hiScore=score; saveHi(); }
+    return;
+  }
+  
+  // Mover invasores
+  updateInvaders();
+  
+  // Balas enemigas
+  if(eShootCool<=0 && countAlive()>0){
+    enemyShoot();
+    var cfg=levelConfig(level);
+    eShootCool=cfg.eShootBase+Math.floor(Math.random()*20);
+  }
+  
+  for(var i=eBullets.length-1;i>=0;i--){
+    var eb=eBullets[i];
+    eb.y+=eb.vy;
+    if(eb.y>H+10){ eBullets.splice(i,1); continue; }
+    
+    // vs jugador
+    if(pBlink<=0 && rectHit(eb.x,eb.y,eb.w,eb.h, pX,pY,SHIP_W,SHIP_H)){
+      eBullets.splice(i,1);
+      loseLife();
+    }
+  }
+  
+  // UFO
+  ufoTimer--;
+  if(ufoTimer<=0 && !ufo.active){
+    ufo.active=true;
+    ufo.dir=Math.random()<0.5?1:-1;
+    ufo.x=ufo.dir===1?-50:W+10;
+    ufo.y=22;
+    var cfg=levelConfig(level);
+    ufo.speed=cfg.ufoSpeed;
+    ufoTimer=cfg.ufoInterval;
+  }
+  if(ufo.active){
+    ufo.x+=ufo.dir*ufo.speed;
+    if(ufo.x>W+60||ufo.x<-60) ufo.active=false;
+  }
+  
+  // Level up timer
+  if(state===STATE.LEVELUP){
+    levelUpTimer--;
+    if(levelUpTimer<=0){
+      initLevel(level);
+      state=STATE.PLAYING;
+    }
+  }
+  
+  updateHUD();
+}
+
+// Textos flotantes
+var floatingTexts=[];
+function showFloating(text, x, y, color){
+  floatingTexts.push({text:text, x:x, y:y, vy:-1, life:40, color:color||'#fff'});
+}
+function updateFloating(){
+  for(var i=floatingTexts.length-1;i>=0;i--){
+    var ft=floatingTexts[i];
+    ft.y+=ft.vy;
+    ft.life--;
+    if(ft.life<=0){ floatingTexts.splice(i,1); continue; }
+    ctx.globalAlpha=ft.life/40;
+    ctx.fillStyle=ft.color;
+    ctx.font='bold 10px monospace';
+    ctx.textAlign='center';
+    ctx.fillText(ft.text, ft.x, ft.y);
+  }
+  ctx.globalAlpha=1;
+  ctx.textAlign='left';
+}
+
+// ============ PANTALLA DE TÍTULO ============
+var titleAnim=0;
+function drawTitle(){
+  titleAnim++;
+  ctx.fillStyle='#000';
+  ctx.fillRect(0,0,W,H);
+  drawStars(titleAnim);
+  
+  // Logo retro pixel
+  ctx.font='bold 36px monospace';
+  ctx.textAlign='center';
+  var hue=(titleAnim*2)%360;
+  ctx.fillStyle='hsl('+hue+',100%,60%)';
+  ctx.shadowColor='hsl('+hue+',100%,40%)';
+  ctx.shadowBlur=12;
+  ctx.fillText('SPACE', W/2, 100);
+  ctx.fillText('RAIDERS', W/2, 142);
+  ctx.shadowBlur=0;
+  
+  // Mostrar los 3 tipos de invasores con puntuaciones
+  ctx.font='bold 11px monospace';
+  ctx.fillStyle='#aaa';
+  ctx.fillText('= PUNTUACIONES =', W/2, 195);
+  
+  var demo=[
+    {type:'A', y:230, pts:30},
+    {type:'B', y:290, pts:20},
+    {type:'C', y:350, pts:10}
+  ];
+  for(var i=0;i<demo.length;i++){
+    var d=demo[i];
+    var spr=SPRITES[d.type];
+    drawSprite(spr, W/2-60, d.y, titleAnim);
+    ctx.fillStyle=getInvBaseColor(d.type==='A'?0:d.type==='B'?1:3);
+    ctx.font='bold 12px monospace';
+    ctx.textAlign='left';
+    ctx.fillText('= '+d.pts+' PTS', W/2-10, d.y+22);
+  }
+  // UFO
+  drawUFO(W/2-60, 410);
+  ctx.fillStyle='#f55';
+  ctx.font='bold 12px monospace';
+  ctx.textAlign='left';
+  ctx.fillText('= ??? PTS', W/2-10, 430);
+  
+  ctx.textAlign='center';
+  ctx.font='bold 13px monospace';
+  var blink=Math.floor(titleAnim/20)%2===0;
+  if(blink){
+    ctx.fillStyle='#0f0';
+    ctx.shadowColor='#0f0';
+    ctx.shadowBlur=8;
+    ctx.fillText('[ TOCA PARA JUGAR ]', W/2, H-50);
+    ctx.shadowBlur=0;
+  }
+  
+  if(hiScore>0){
+    ctx.font='11px monospace';
+    ctx.fillStyle='#ff0';
+    ctx.fillText('MEJOR: '+pad(hiScore,6), W/2, H-25);
+  }
+}
+
+// ============ PANTALLA LEVEL UP ============
+function drawLevelUp(){
+  ctx.fillStyle='rgba(0,0,0,0.7)';
+  ctx.fillRect(0,0,W,H);
+  ctx.textAlign='center';
+  ctx.font='bold 28px monospace';
+  ctx.fillStyle='#0ff';
+  ctx.shadowColor='#0ff';
+  ctx.shadowBlur=15;
+  ctx.fillText('¡NIVEL '+level+'!', W/2, H/2-20);
+  ctx.shadowBlur=0;
+  ctx.font='14px monospace';
+  ctx.fillStyle='#fff';
+  ctx.fillText('PUNTOS: '+pad(score,6), W/2, H/2+20);
+}
+
+// ============ PANTALLA GAME OVER ============
+var goAnim=0;
+function drawGameOver(){
+  goAnim++;
+  ctx.fillStyle='rgba(0,0,0,0.85)';
+  ctx.fillRect(0,0,W,H);
+  ctx.textAlign='center';
+  ctx.font='bold 30px monospace';
+  ctx.fillStyle='#f00';
+  ctx.shadowColor='#f00';
+  ctx.shadowBlur=15;
+  ctx.fillText('GAME OVER', W/2, H/2-60);
+  ctx.shadowBlur=0;
+  ctx.font='14px monospace';
+  ctx.fillStyle='#fff';
+  ctx.fillText('PUNTOS: '+pad(score,6), W/2, H/2-20);
+  if(score>=hiScore && score>0){
+    ctx.fillStyle='#ff0';
+    ctx.font='bold 12px monospace';
+    ctx.fillText('¡NUEVO RÉCORD!', W/2, H/2+10);
+  }
+  ctx.fillStyle='#aaa';
+  ctx.font='11px monospace';
+  ctx.fillText('MEJOR: '+pad(hiScore,6), W/2, H/2+35);
+  
+  var blink=Math.floor(goAnim/25)%2===0;
+  if(blink){
+    ctx.fillStyle='#0f0';
+    ctx.shadowColor='#0f0';
+    ctx.shadowBlur=8;
+    ctx.font='bold 12px monospace';
+    ctx.fillText('[ TOCA PARA VOLVER ]', W/2, H-50);
+    ctx.shadowBlur=0;
+  }
+}
+
+// ============ DIBUJO PRINCIPAL ============
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  
+  if(state===STATE.TITLE){ drawTitle(); return; }
+  if(state===STATE.GAMEOVER){ drawGameOver(); return; }
+  
+  // Fondo
+  ctx.fillStyle='#000';
+  ctx.fillRect(0,0,W,H);
+  drawStars(frame);
+  
+  // Línea del suelo
+  ctx.fillStyle='#1a3a1a';
+  ctx.fillRect(0, H-30, W, 2);
+  
+  // Invasores
+  for(var r=0;r<INV_ROWS;r++){
+    for(var c=0;c<INV_COLS;c++){
+      if(invaders[r][c]){
+        var pos=getInvPos(c,r);
+        var type=getInvType(r);
+        drawSprite(SPRITES[type], pos.x, pos.y, invFrame);
+      }
+    }
+  }
+  
+  // UFO
+  if(ufo.active){
+    drawUFO(ufo.x, ufo.y);
+    // parpadeo UFO
+    if(frame%10<5){
+      ctx.fillStyle='rgba(255,80,80,0.15)';
+      ctx.fillRect(ufo.x, ufo.y, 11*PX, 5*PX);
+    }
+  }
+  
+  // Jugador (con parpadeo al ser golpeado)
+  if(pBlink<=0 || Math.floor(pBlink/6)%2===0){
+    drawShip(pX, pY);
+  }
+  
+  // Bala jugador
+  for(var i=0;i<bullets.length;i++){
+    var b=bullets[i];
+    ctx.fillStyle='#ffe066';
+    ctx.shadowColor='#ff0';
+    ctx.shadowBlur=4;
+    ctx.fillRect(b.x, b.y, b.w, b.h);
+    ctx.shadowBlur=0;
+  }
+  
+  // Balas enemigas
+  for(var i=0;i<eBullets.length;i++){
+    var eb=eBullets[i];
+    // animación zigzag
+    var zz=frame%6<3?1:-1;
+    ctx.fillStyle='#f55';
+    ctx.shadowColor='#f00';
+    ctx.shadowBlur=3;
+    ctx.fillRect(eb.x+zz, eb.y, eb.w, eb.h);
+    ctx.shadowBlur=0;
+  }
+  
+  // Partículas
+  updateParticles();
+  
+  // Textos flotantes
+  updateFloating();
+  
+  // LEVEL UP overlay
+  if(state===STATE.LEVELUP) drawLevelUp();
+}
+
+// ============ GAME LOOP ============
+function loop(){
+  updateGame();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// ============ CONTROLES TÁCTILES ============
+var touchActive=false, lastTouchX=0, touchStartX=0, touchStartTime=0, movedSig=false;
+
+function getTouchLogicX(clientX){
+  var rect=C.getBoundingClientRect();
+  return (clientX-rect.left)/rect.width*W;
+}
+
+C.addEventListener('touchstart',function(e){
+  e.preventDefault();
+  getAC(); // desbloquear audio
+  var t=e.touches[0];
+  var lx=getTouchLogicX(t.clientX);
+  touchStartX=lx; lastTouchX=lx; touchStartTime=Date.now(); movedSig=false; touchActive=true;
+  if(state===STATE.TITLE){ restartGame(); return; }
+  if(state===STATE.GAMEOVER){ state=STATE.TITLE; return; }
+  // mover nave al dedo
+  pX=Math.min(Math.max(lx-SHIP_W/2, 5), W-SHIP_W-5);
+},{passive:false});
+
+C.addEventListener('touchmove',function(e){
+  e.preventDefault();
+  if(!touchActive) return;
+  var t=e.touches[0];
+  var lx=getTouchLogicX(t.clientX);
+  var dx=lx-lastTouchX;
+  if(Math.abs(lx-touchStartX)>5) movedSig=true;
+  pX=Math.min(Math.max(pX+dx, 5), W-SHIP_W-5);
+  lastTouchX=lx;
+},{passive:false});
+
+C.addEventListener('touchend',function(e){
+  e.preventDefault();
+  touchActive=false;
+  if(state!==STATE.PLAYING) return;
+  var dur=Date.now()-touchStartTime;
+  if(!movedSig && dur<250 && shotCool<=0){
+    bullets.push({x:pX+SHIP_W/2-2, y:pY-5, w:4, h:12});
+    shotCool=SHOT_DELAY;
+    sndShoot();
+  }
+});
+C.addEventListener('touchcancel',function(e){ touchActive=false; });
+
+// ============ RATÓN / PC ============
+var mouseDown=false, mouseMoved=false;
+C.addEventListener('mousedown',function(e){
+  e.preventDefault(); getAC();
+  if(state===STATE.TITLE){ restartGame(); return; }
+  if(state===STATE.GAMEOVER){ state=STATE.TITLE; return; }
+  var rect=C.getBoundingClientRect();
+  var lx=(e.clientX-rect.left)/rect.width*W;
+  pX=Math.min(Math.max(lx-SHIP_W/2, 5), W-SHIP_W-5);
+  mouseDown=true; mouseMoved=false;
+});
+C.addEventListener('mousemove',function(e){
+  if(!mouseDown) return;
+  mouseMoved=true;
+  var rect=C.getBoundingClientRect();
+  var lx=(e.clientX-rect.left)/rect.width*W;
+  pX=Math.min(Math.max(lx-SHIP_W/2, 5), W-SHIP_W-5);
+});
+C.addEventListener('mouseup',function(e){
+  if(mouseDown && !mouseMoved && state===STATE.PLAYING && shotCool<=0){
+    bullets.push({x:pX+SHIP_W/2-2, y:pY-5, w:4, h:12});
+    shotCool=SHOT_DELAY; sndShoot();
+  }
+  mouseDown=false;
+});
+
+// ============ TECLADO ============
+var keys={};
+window.addEventListener('keydown',function(e){
+  keys[e.key]=true;
+  if(e.key===' '||e.key==='ArrowLeft'||e.key==='ArrowRight') e.preventDefault();
+  if(e.key===' '){
+    getAC();
+    if(state===STATE.TITLE){ restartGame(); return; }
+    if(state===STATE.GAMEOVER){ state=STATE.TITLE; return; }
+    if(state===STATE.PLAYING && shotCool<=0){
+      bullets.push({x:pX+SHIP_W/2-2, y:pY-5, w:4, h:12});
+      shotCool=SHOT_DELAY; sndShoot();
+    }
+  }
+});
+window.addEventListener('keyup',function(e){ keys[e.key]=false; });
+
+// Movimiento por teclado integrado en el loop
+var origUpdate=updateGame;
+updateGame=function(){
+  if(state===STATE.PLAYING){
+    if(keys['ArrowLeft']) pX=Math.max(5, pX-6);
+    if(keys['ArrowRight']) pX=Math.min(W-SHIP_W-5, pX+6);
+  }
+  origUpdate();
+};
+
+// ============ HISCORE LOCAL ============
+function saveHi(){
+  try{ localStorage.setItem('spaceRaidersHi', hiScore); }catch(e){}
+}
+function loadHi(){
+  try{ var v=parseInt(localStorage.getItem('spaceRaidersHi')||'0'); hiScore=isNaN(v)?0:v; }catch(e){}
+}
+
+// ============ INIT ============
+loadHi();
+makeStars();
+resize();
+updateHUD();
+loop();
+
+})();
+</script>
+</body>
+</html>
